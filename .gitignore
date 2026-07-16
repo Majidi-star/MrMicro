@@ -1,0 +1,53 @@
+# ====================================================================
+# Git Ignore Configuration for Metahuman Micro-Expression Trainer
+# ====================================================================
+
+# Dependencies & Build Outputs
+node_modules/
+dist/
+dist-ssr/
+build/
+bin/
+obj/
+
+# Unreal Engine Engine & Project Binaries
+Binaries/
+Build/
+Config/
+Content/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.uproject
+
+# Python Cache & Dumps
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# IDE / System Configuration Dirs
+.vscode/
+.idea/
+.cursor/
+.codex/
+.gemini/
+.DS_Store
+Thumbs.db
+
+# Generated datasets and rendering outputs (prevent uploading gigabytes)
+webapp/public/dataset/*.png
+webapp/public/dataset/database.json
+webapp/public/renders/*.png
+webapp/public/renders/*.jpg
+webapp/public/renders/*.jpeg
+
+# Local Debug outputs and scratch text dumps
+*.txt
+*.log
+pose_interrogation_results.json
+
+# Keep control maps and configurations
+!face_controlboard_controls.json
