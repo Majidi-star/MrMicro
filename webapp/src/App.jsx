@@ -76,26 +76,58 @@ function App() {
   const [activeTab, setActiveTab] = useState('FLASHCARDS');
   const [selectedEmotions, setSelectedEmotions] = useState([]);
   const [selectedAUs, setSelectedAUs] = useState([]);
-  const [displayMode, setDisplayMode] = useState('Comparison'); // 'Comparison', 'Static', 'Timed'
-  const [flashDuration, setFlashDuration] = useState(300); // ms exposure duration
+  const [displayMode, setDisplayMode] = useState('Comparison'); 
+  const [flashDuration, setFlashDuration] = useState(300); 
   const [isFlashing, setIsFlashing] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [sliderValue, setSliderValue] = useState(50);
   const flashTimeoutRef = useRef(null);
   const isFlashingRef = useRef(false);
 
-  // Settings Configuration State
+  // Settings Configuration State (Flashcards)
   const [intensityMin, setIntensityMin] = useState(4);
   const [intensityMax, setIntensityMax] = useState(7);
   const [speed, setSpeed] = useState(300);
   const [difficulty, setDifficulty] = useState('Intermediate');
   const [theme, setTheme] = useState('Dark');
 
+  // Video Training State variables
+  const [videoDatasetCache, setVideoDatasetCache] = useState([]);
+  const [videoDeck, setVideoDeck] = useState([]);
+  const [videoPoolSize, setVideoPoolSize] = useState(0);
+  const [videoDrawnIndices, setVideoDrawnIndices] = useState([]);
+  const [videoReviewedCount, setVideoReviewedCount] = useState(1);
+  const [videoIsDeckCompleted, setVideoIsDeckCompleted] = useState(false);
+  const [videoIsRangeEmpty, setVideoIsRangeEmpty] = useState(false);
+  const [currentVideo, setCurrentVideo] = useState(null);
+  
+  // HTML5 Video Refs and States
+  const videoRef = useRef(null);
+  const guideVideoRef = useRef(null);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  
+  const [videoIsPlaying, setVideoIsPlaying] = useState(false);
+  const [videoPlaybackSpeed, setVideoPlaybackSpeed] = useState(1.0);
+  const [videoSelectedEmotions, setVideoSelectedEmotions] = useState([]);
+  const [videoSelectedAUs, setVideoSelectedAUs] = useState([]);
+  const [videoHasSubmitted, setVideoHasSubmitted] = useState(false);
+  const [videoZoomMain, setVideoZoomMain] = useState(2.2);
+  const [videoZoomGuide, setVideoZoomGuide] = useState(2.2);
+
+  // Video settings
+  const [videoIntensityMin, setVideoIntensityMin] = useState(4);
+  const [videoIntensityMax, setVideoIntensityMax] = useState(7);
+  const [videoDifficulty, setVideoDifficulty] = useState('Intermediate');
+  const [videoHoldDuration, setVideoHoldDuration] = useState(100); 
+
   // Lighting Settings for Unreal
   const [lightYaw, setLightYaw] = useState(45);
   const [lightPitch, setLightPitch] = useState(45);
 
   // Batch Generation State
+  const [datasetType, setDatasetType] = useState('flashcards'); 
+  const [dbVideoHoldDuration, setDbVideoHoldDuration] = useState(100);
   const [batchSize, setBatchSize] = useState("50");
   const [batchIntensityMin, setBatchIntensityMin] = useState(1);
   const [batchIntensityMax, setBatchIntensityMax] = useState(10);
@@ -147,16 +179,6 @@ function App() {
     }
   };
 
-  const shuffleDeck = (size) => {
-    let arr = Array.from({ length: size }, (_, i) => i);
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  };
-
-  // Progress Polling Hook
   useEffect(() => {
     let interval;
     if (isBatching) {
@@ -173,7 +195,6 @@ function App() {
     return () => clearInterval(interval);
   }, [isBatching]);
 
-  // Apply Theme globally
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme.toLowerCase());
   }, [theme]);
@@ -186,7 +207,7 @@ function App() {
       .map((entry, index) => ({ entry, index }))
       .filter(({ entry }) => {
         const isNeutral = entry.emotions.length === 0 || entry.emotions.includes("NEUTRAL");
-        if (isNeutral) return false; // Strictly exclude neutral entries from active test deck
+        if (isNeutral) return false; 
         const intVal = entry.intensity * 10;
         return intVal >= (intensityMin - 0.05) && intVal <= (intensityMax + 0.05);
       })
@@ -236,73 +257,128 @@ function App() {
     }
   };
 
+  const reshuffleVideoDeckWithFilters = (customCache = null) => {
+    const cache = customCache || videoDatasetCache;
+    if (cache.length === 0) return;
+
+    const filteredIndices = cache
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => {
+        const isNeutral = entry.emotions.length === 0 || entry.emotions.includes("NEUTRAL");
+        if (isNeutral) return false;
+        const intVal = entry.intensity * 10;
+        const matchesIntensity = intVal >= (videoIntensityMin - 0.05) && intVal <= (videoIntensityMax + 0.05);
+        const matchesDuration = entry.duration_ms === videoHoldDuration;
+        return matchesIntensity && matchesDuration;
+      })
+      .map(({ index }) => index);
+
+    if (filteredIndices.length === 0) {
+      setVideoPoolSize(0);
+      setVideoDeck([]);
+      setVideoDrawnIndices([]);
+      setVideoReviewedCount(0);
+      setVideoIsRangeEmpty(true);
+      setVideoIsDeckCompleted(false);
+      setVideoHasSubmitted(false);
+      setCurrentVideo(null);
+      setVideoIsPlaying(false);
+    } else {
+      setVideoPoolSize(filteredIndices.length);
+      setVideoIsRangeEmpty(false);
+      let arr = [...filteredIndices];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      const firstIndex = arr.pop();
+      setVideoDeck(arr);
+      setVideoDrawnIndices([]);
+      setVideoReviewedCount(1);
+      setVideoIsDeckCompleted(false);
+      setVideoHasSubmitted(false);
+      setVideoIsPlaying(false);
+
+      const firstEntry = cache[firstIndex];
+      setCurrentVideo({
+        ...firstEntry,
+        dbIndex: firstIndex
+      });
+    }
+  };
+
   const loadDataset = () => {
-    // Append timestamp cache-buster to completely bypass browser disk caching
     fetch('/dataset/database.json?_=' + new Date().getTime())
       .then(res => res.json())
       .then(data => {
         if (!data || data.length === 0) return;
         setDatasetCache(data);
-        
-        // Find foundational Neutral state for the slider baseline
         const neutralEntry = data.find(entry => entry.emotions.length === 0 || entry.emotions.includes("NEUTRAL")) || data[0];
         const neutralUrl = `/dataset/${neutralEntry.image}`;
         setGlobalNeutral(neutralUrl);
-
         reshuffleDeckWithFilters(data);
       })
       .catch(err => console.log('Offline Database not found. Generate a batch first!', err));
   };
 
-  const handleReshuffleDeck = () => {
-    reshuffleDeckWithFilters();
+  const loadVideoDataset = () => {
+    fetch('/dataset/database_video.json?_=' + new Date().getTime())
+      .then(res => res.json())
+      .then(data => {
+        if (!data || data.length === 0) return;
+        setVideoDatasetCache(data);
+        reshuffleVideoDeckWithFilters(data);
+      })
+      .catch(err => console.log('Offline Video Database not found. Generate a video batch first!', err));
   };
 
-  const handleReshuffleFromSettings = () => {
-    reshuffleDeckWithFilters();
-    setIsSettingsOpen(false);
-  };
+  const handleReshuffleDeck = () => reshuffleDeckWithFilters();
+  const handleReshuffleVideoDeck = () => reshuffleVideoDeckWithFilters();
+  const handleReshuffleFromSettings = () => { reshuffleDeckWithFilters(); setIsSettingsOpen(false); };
+  const handleReshuffleVideoFromSettings = () => { reshuffleVideoDeckWithFilters(); setIsSettingsOpen(false); };
 
   const handleDifficultyChange = (diff) => {
     setDifficulty(diff);
-    if (diff === 'Very Easy') {
-      setIntensityMin(9);
-      setIntensityMax(10);
-    } else if (diff === 'Easy') {
-      setIntensityMin(7);
-      setIntensityMax(9);
-    } else if (diff === 'Novice') {
-      setIntensityMin(6);
-      setIntensityMax(8);
-    } else if (diff === 'Beginner') {
-      setIntensityMin(5);
-      setIntensityMax(7);
-    } else if (diff === 'Intermediate') {
-      setIntensityMin(4);
-      setIntensityMax(7);
-    } else if (diff === 'Advanced') {
-      setIntensityMin(3);
-      setIntensityMax(5);
-    } else if (diff === 'Expert') {
-      setIntensityMin(2);
-      setIntensityMax(4);
-    } else if (diff === 'Master') {
-      setIntensityMin(1);
-      setIntensityMax(3);
-    } else if (diff === 'Grandmaster') {
-      setIntensityMin(1);
-      setIntensityMax(2);
+    const mapping = {
+      'Very Easy': [9, 10], 'Easy': [7, 9], 'Novice': [6, 8],
+      'Beginner': [5, 7], 'Intermediate': [4, 7], 'Advanced': [3, 5],
+      'Expert': [2, 4], 'Master': [1, 3], 'Grandmaster': [1, 2]
+    };
+    if (mapping[diff]) {
+      setIntensityMin(mapping[diff][0]);
+      setIntensityMax(mapping[diff][1]);
     }
   };
 
-  // Reshuffle deck when Settings modal is closed to apply new intensity/difficulty filters
+  const handleVideoDifficultyChange = (diff) => {
+    setVideoDifficulty(diff);
+    const intensityMapping = {
+      'Very Easy': [9, 10], 'Easy': [7, 9], 'Novice': [6, 8],
+      'Beginner': [5, 7], 'Intermediate': [4, 7], 'Advanced': [3, 5],
+      'Expert': [2, 4], 'Master': [1, 3], 'Grandmaster': [1, 2]
+    };
+    const durationMapping = {
+      'Very Easy': 500, 'Easy': 250, 'Novice': 200,
+      'Beginner': 150, 'Intermediate': 100, 'Advanced': 80,
+      'Expert': 60, 'Master': 50, 'Grandmaster': 50
+    };
+    if (intensityMapping[diff]) {
+      setVideoIntensityMin(intensityMapping[diff][0]);
+      setVideoIntensityMax(intensityMapping[diff][1]);
+    }
+    if (durationMapping[diff]) {
+      setVideoHoldDuration(durationMapping[diff]);
+      setDbVideoHoldDuration(durationMapping[diff]);
+    }
+  };
+
   useEffect(() => {
-    if (!isSettingsOpen && datasetCache.length > 0) {
-      reshuffleDeckWithFilters();
+    if (!isSettingsOpen) {
+      if (datasetCache.length > 0) reshuffleDeckWithFilters();
+      if (videoDatasetCache.length > 0) reshuffleVideoDeckWithFilters();
     }
   }, [isSettingsOpen]);
 
-  // Auto-Reveal Timer Hook
   useEffect(() => {
     let timer;
     if (activeTab === 'FLASHCARDS' && displayMode === 'Comparison' && autoFlashEnabled && !hasSubmitted && viewingImage === 'NEUTRAL') {
@@ -311,12 +387,11 @@ function App() {
     return () => clearTimeout(timer);
   }, [viewingImage, hasSubmitted, autoFlashEnabled, autoFlashDelay, activeTab, currentFlashcard, displayMode]);
 
-  // Load Offline Dataset
   useEffect(() => {
     loadDataset();
+    loadVideoDataset();
   }, []);
 
-  // Handle escape key to close settings
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') setIsSettingsOpen(false);
@@ -324,8 +399,6 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  const configLimits = { intensityMin: 1, intensityMax: 10, speedMin: 50, speedMax: 1000, angleMin: 0, angleMax: 360 };
 
   const toggleAU = (id) => {
     if (selectedAUs.includes(id)) setSelectedAUs(selectedAUs.filter(au => au !== id));
@@ -335,6 +408,16 @@ function App() {
   const toggleEmotion = (emo) => {
     if (selectedEmotions.includes(emo)) setSelectedEmotions(selectedEmotions.filter(e => e !== emo));
     else setSelectedEmotions([...selectedEmotions, emo]);
+  };
+
+  const toggleVideoAU = (id) => {
+    if (videoSelectedAUs.includes(id)) setVideoSelectedAUs(videoSelectedAUs.filter(au => au !== id));
+    else setVideoSelectedAUs([...videoSelectedAUs, id]);
+  };
+
+  const toggleVideoEmotion = (emo) => {
+    if (videoSelectedEmotions.includes(emo)) setVideoSelectedEmotions(videoSelectedEmotions.filter(e => e !== emo));
+    else setVideoSelectedEmotions([...videoSelectedEmotions, emo]);
   };
 
   const triggerFlash = () => {
@@ -350,7 +433,6 @@ function App() {
     }, flashDuration);
   };
 
-  // Clean up any pending flash timers on component unmount
   useEffect(() => {
     return () => {
       if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
@@ -363,6 +445,12 @@ function App() {
     setSliderValue(50);
   };
 
+  const handleCheckVideoAnswer = () => {
+    setVideoHasSubmitted(true);
+    if (videoRef.current) videoRef.current.pause();
+    setVideoIsPlaying(false);
+  };
+
   const handleNextImage = async () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
@@ -371,11 +459,11 @@ function App() {
     setHasSubmitted(false);
     setSelectedEmotions([]);
     setSelectedAUs([]);
-    setViewingImage('NEUTRAL'); // Force neutral first
+    setViewingImage('NEUTRAL');
     setSliderValue(50);
 
     if (datasetCache.length === 0) {
-      alert("No dataset generated yet! Please go to Settings -> Database and generate a batch first.");
+      alert("No dataset generated yet! Please go to Settings -> Database and generate a batch.");
       return;
     }
 
@@ -387,14 +475,10 @@ function App() {
         setIsLoading(false);
         return;
       }
-
       const nextIndex = currentDeck.pop();
       setDeck(currentDeck);
 
-      if (currentFlashcard.dbIndex !== undefined) {
-        setDrawnIndices(prev => [...prev, currentFlashcard.dbIndex]);
-      }
-      
+      if (currentFlashcard.dbIndex !== undefined) setDrawnIndices(prev => [...prev, currentFlashcard.dbIndex]);
       setReviewedCount(prev => prev + 1);
 
       const randomEntry = datasetCache[nextIndex];
@@ -412,7 +496,6 @@ function App() {
 
   const handlePrevImage = () => {
     if (drawnIndices.length === 0) return;
-
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
     setIsFlashing(false);
@@ -427,10 +510,7 @@ function App() {
     setTimeout(() => {
       const prevArr = [...drawnIndices];
       const prevIndex = prevArr.pop();
-
-      if (currentFlashcard.dbIndex !== undefined) {
-        setDeck(prevDeck => [...prevDeck, currentFlashcard.dbIndex]);
-      }
+      if (currentFlashcard.dbIndex !== undefined) setDeck(prevDeck => [...prevDeck, currentFlashcard.dbIndex]);
       setDrawnIndices(prevArr);
       setReviewedCount(prev => Math.max(1, prev - 1));
 
@@ -447,12 +527,93 @@ function App() {
     }, 400);
   };
 
+  // Video Timeline / Navigation
+  const handleTogglePlay = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      videoRef.current.play();
+      setVideoIsPlaying(true);
+    } else {
+      videoRef.current.pause();
+      setVideoIsPlaying(false);
+    }
+  };
+
+  const handleReplay = () => {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = 0;
+    videoRef.current.play();
+    setVideoIsPlaying(true);
+  };
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = videoPlaybackSpeed;
+    }
+  }, [videoPlaybackSpeed, currentVideo]);
+
+  const handleNextVideo = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setVideoIsPlaying(false);
+    setVideoHasSubmitted(false);
+    setVideoSelectedEmotions([]);
+    setVideoSelectedAUs([]);
+
+    if (videoDatasetCache.length === 0) return;
+
+    let currentVideoDeck = [...videoDeck];
+    if (currentVideoDeck.length === 0) {
+      setVideoIsDeckCompleted(true);
+      return;
+    }
+
+    const nextIndex = currentVideoDeck.pop();
+    setVideoDeck(currentVideoDeck);
+
+    if (currentVideo && currentVideo.dbIndex !== undefined) {
+      setVideoDrawnIndices(prev => [...prev, currentVideo.dbIndex]);
+    }
+    setVideoReviewedCount(prev => prev + 1);
+
+    const nextEntry = videoDatasetCache[nextIndex];
+    setCurrentVideo({ ...nextEntry, dbIndex: nextIndex });
+  };
+
+  const handlePrevVideo = () => {
+    if (videoDrawnIndices.length === 0) return;
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setVideoIsPlaying(false);
+    setVideoHasSubmitted(false);
+    setVideoSelectedEmotions([]);
+    setVideoSelectedAUs([]);
+
+    const prevArr = [...videoDrawnIndices];
+    const prevIndex = prevArr.pop();
+
+    if (currentVideo && currentVideo.dbIndex !== undefined) {
+      setVideoDeck(prevDeck => [...prevDeck, currentVideo.dbIndex]);
+    }
+    setVideoDrawnIndices(prevArr);
+    setVideoReviewedCount(prev => Math.max(1, prev - 1));
+
+    const prevEntry = videoDatasetCache[prevIndex];
+    setCurrentVideo({ ...prevEntry, dbIndex: prevIndex });
+  };
+
+  const getPeakTimestamp = () => {
+    // Neural onset starts at 0.2s + 0.08s onset = 0.28s
+    return 0.28;
+  };
+
   const isEmotionCorrect = selectedEmotions.length === currentFlashcard.correctEmotions.length && selectedEmotions.every(v => currentFlashcard.correctEmotions.includes(v));
   const isAUsCorrect = selectedAUs.length === currentFlashcard.correctAUs.length && selectedAUs.every(v => currentFlashcard.correctAUs.includes(v));
 
+  const isVideoEmotionCorrect = currentVideo && videoSelectedEmotions.length === currentVideo.emotions.length && videoSelectedEmotions.every(v => currentVideo.emotions.includes(v));
+  const isVideoAUsCorrect = currentVideo && videoSelectedAUs.length === (currentVideo.controls_applied ? Object.keys(currentVideo.controls_applied).length : 0) && videoSelectedAUs.every(v => Object.keys(currentVideo.controls_applied).includes(v));
+
   return (
     <div className="app-container">
-      {/* Settings Modal Hook */}
       {isSettingsOpen && (
         <div className="settings-overlay" onClick={() => setIsSettingsOpen(false)}>
           <div className="settings-modal" onClick={e => e.stopPropagation()}>
@@ -467,6 +628,9 @@ function App() {
                 <div className={`sidebar-item ${activeSettingsTab === 'Flashcards' ? 'active' : ''}`} onClick={() => setActiveSettingsTab('Flashcards')}>
                   <span style={{ fontSize: '16px', marginRight: '6px' }}>⚡</span> Flashcards
                 </div>
+                <div className={`sidebar-item ${activeSettingsTab === 'VideoTraining' ? 'active' : ''}`} onClick={() => setActiveSettingsTab('VideoTraining')}>
+                  <span style={{ fontSize: '16px', marginRight: '6px' }}>🎥</span> Video Training
+                </div>
                 <div className={`sidebar-item ${activeSettingsTab === 'Database' ? 'active' : ''}`} onClick={() => setActiveSettingsTab('Database')}>
                   <span style={{ fontSize: '16px', marginRight: '6px' }}>🗄️</span> Database
                 </div>
@@ -474,7 +638,7 @@ function App() {
             </div>
 
             <div className="settings-content">
-              <h2>{activeSettingsTab} Settings</h2>
+              <h2>{activeSettingsTab === 'VideoTraining' ? 'Video Training' : activeSettingsTab} Settings</h2>
 
               {activeSettingsTab === 'Flashcards' && (
                 <div className="settings-form">
@@ -503,51 +667,18 @@ function App() {
                       <span className="slider-value-display">{intensityMin} - {intensityMax}</span>
                     </div>
                     <div className="dual-range-container">
-                      <div className="dual-range-track" style={{
-                        left: `${(intensityMin - 1) * 11.11}%`,
-                        right: `${100 - (intensityMax - 1) * 11.11}%`
-                      }}></div>
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="10" 
-                        value={intensityMin} 
-                        onChange={(e) => {
-                          const val = Math.min(Number(e.target.value), intensityMax);
-                          setIntensityMin(val);
-                        }} 
-                        className="dual-range-input"
-                        style={{ zIndex: intensityMin > 5 ? 5 : 3 }}
-                      />
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="10" 
-                        value={intensityMax} 
-                        onChange={(e) => {
-                          const val = Math.max(Number(e.target.value), intensityMin);
-                          setIntensityMax(val);
-                        }} 
-                        className="dual-range-input"
-                        style={{ zIndex: intensityMin > 5 ? 3 : 5 }}
-                      />
+                      <div className="dual-range-track" style={{ left: `${(intensityMin - 1) * 11.11}%`, right: `${100 - (intensityMax - 1) * 11.11}%` }}></div>
+                      <input type="range" min="1" max="10" value={intensityMin} onChange={(e) => setIntensityMin(Math.min(Number(e.target.value), intensityMax))} className="dual-range-input" style={{ zIndex: intensityMin > 5 ? 5 : 3 }} />
+                      <input type="range" min="1" max="10" value={intensityMax} onChange={(e) => setIntensityMax(Math.max(Number(e.target.value), intensityMin))} className="dual-range-input" style={{ zIndex: intensityMin > 5 ? 3 : 5 }} />
                     </div>
                   </div>
-
-
 
                   <div className="form-group">
                     <label>Curriculum Difficulty Override</label>
                     <select value={difficulty} onChange={(e) => handleDifficultyChange(e.target.value)} className="claude-select">
-                      <option value="Very Easy">Very Easy</option>
-                      <option value="Easy">Easy</option>
-                      <option value="Novice">Novice</option>
-                      <option value="Beginner">Beginner</option>
-                      <option value="Intermediate">Intermediate</option>
-                      <option value="Advanced">Advanced</option>
-                      <option value="Expert">Expert</option>
-                      <option value="Master">Master</option>
-                      <option value="Grandmaster">Grandmaster</option>
+                      <option value="Very Easy">Very Easy</option><option value="Easy">Easy</option><option value="Novice">Novice</option>
+                      <option value="Beginner">Beginner</option><option value="Intermediate">Intermediate</option><option value="Advanced">Advanced</option>
+                      <option value="Expert">Expert</option><option value="Master">Master</option><option value="Grandmaster">Grandmaster</option>
                     </select>
                   </div>
 
@@ -570,9 +701,55 @@ function App() {
                   )}
 
                   <div className="form-group" style={{ borderTop: '1px solid var(--settings-border)', paddingTop: '20px', display: 'flex', justifyContent: 'center' }}>
-                    <button className="submit-btn" style={{ width: '100%', padding: '10px' }} onClick={handleReshuffleFromSettings}>
-                      RESHUFFLE DECK NOW
-                    </button>
+                    <button className="submit-btn" style={{ width: '100%', padding: '10px' }} onClick={handleReshuffleFromSettings}>RESHUFFLE DECK NOW</button>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'VideoTraining' && (
+                <div className="settings-form">
+                  <div className="form-group stacked">
+                    <div className="flex-row-between">
+                      <label>Default Playback Speed</label>
+                      <span className="slider-value-display">{parseFloat(videoPlaybackSpeed).toFixed(2)}x</span>
+                    </div>
+                    <input type="range" className="claude-slider" min="0.1" max="2.0" step="0.05" value={videoPlaybackSpeed} onChange={(e) => setVideoPlaybackSpeed(parseFloat(e.target.value))} />
+                  </div>
+
+                  <div className="form-group stacked">
+                    <div className="flex-row-between">
+                      <label>Expression Hold Duration (ms)</label>
+                      <span className="slider-value-display">{videoHoldDuration}ms</span>
+                    </div>
+                    <input type="range" className="claude-slider" min="50" max="500" step="10" value={videoHoldDuration} onChange={(e) => {
+                      setVideoHoldDuration(parseInt(e.target.value));
+                      setDbVideoHoldDuration(parseInt(e.target.value));
+                    }} />
+                  </div>
+
+                  <div className="form-group stacked">
+                    <div className="flex-row-between">
+                      <label>Expression Intensity Range (1-10)</label>
+                      <span className="slider-value-display">{videoIntensityMin} - {videoIntensityMax}</span>
+                    </div>
+                    <div className="dual-range-container">
+                      <div className="dual-range-track" style={{ left: `${(videoIntensityMin - 1) * 11.11}%`, right: `${100 - (videoIntensityMax - 1) * 11.11}%` }}></div>
+                      <input type="range" min="1" max="10" value={videoIntensityMin} onChange={(e) => setVideoIntensityMin(Math.min(Number(e.target.value), videoIntensityMax))} className="dual-range-input" style={{ zIndex: videoIntensityMin > 5 ? 5 : 3 }} />
+                      <input type="range" min="1" max="10" value={videoIntensityMax} onChange={(e) => setVideoIntensityMax(Math.max(Number(e.target.value), videoIntensityMin))} className="dual-range-input" style={{ zIndex: videoIntensityMin > 5 ? 3 : 5 }} />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Curriculum Difficulty Override</label>
+                    <select value={videoDifficulty} onChange={(e) => handleVideoDifficultyChange(e.target.value)} className="claude-select">
+                      <option value="Very Easy">Very Easy</option><option value="Easy">Easy</option><option value="Novice">Novice</option>
+                      <option value="Beginner">Beginner</option><option value="Intermediate">Intermediate</option><option value="Advanced">Advanced</option>
+                      <option value="Expert">Expert</option><option value="Master">Master</option><option value="Grandmaster">Grandmaster</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ borderTop: '1px solid var(--settings-border)', paddingTop: '20px', display: 'flex', justifyContent: 'center' }}>
+                    <button className="submit-btn" style={{ width: '100%', padding: '10px' }} onClick={handleReshuffleVideoFromSettings}>RESHUFFLE DECK NOW</button>
                   </div>
                 </div>
               )}
@@ -582,29 +759,53 @@ function App() {
                   <div className="form-group">
                     <label>Application Theme</label>
                     <select value={theme} onChange={(e) => setTheme(e.target.value)} className="claude-select">
-                      <option value="Dark">Dark Mode</option>
-                      <option value="Light">Light Mode</option>
+                      <option value="Dark">Dark Mode</option><option value="Light">Light Mode</option>
                     </select>
                   </div>
                 </div>
               )}
+
               {activeSettingsTab === 'Database' && (
                 <div className="settings-form">
                   <div style={{ marginBottom: '24px', padding: '16px', borderRadius: '8px', background: 'rgba(35, 137, 212, 0.1)', border: '1px solid var(--accent-blue)' }}>
                     <h3 style={{ fontSize: '14px', color: 'var(--accent-blue)', marginBottom: '8px', marginTop: '0' }}>BATCH DATASET GENERATOR</h3>
                     <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4', marginBottom: '16px' }}>Lock up Unreal Engine to automatically render thousands of combinations. This bridges the dynamic environment out to a completely static database.</p>
 
+                    <div style={{ background: 'var(--bg-input)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>DATASET TARGET TYPE</label>
+                      <select className="claude-select" style={{ width: '100%' }} value={datasetType} onChange={(e) => setDatasetType(e.target.value)}>
+                        <option value="flashcards">Flashcards (Static Images)</option>
+                        <option value="videos">Video Cases (MP4 Encoded)</option>
+                      </select>
+                    </div>
+
+                    {datasetType === 'videos' && (
+                      <div style={{ background: 'var(--bg-input)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
+                        <div className="flex-row-between">
+                          <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold', letterSpacing: '1px' }}>EXPRESSION HOLD DURATION</label>
+                          <span className="slider-value-display">{dbVideoHoldDuration}ms</span>
+                        </div>
+                        <input type="range" className="claude-slider" min="50" max="500" step="10" value={dbVideoHoldDuration} onChange={(e) => {
+                          setDbVideoHoldDuration(parseInt(e.target.value));
+                          setVideoHoldDuration(parseInt(e.target.value));
+                        }} />
+                      </div>
+                    )}
+
                     <div style={{ background: 'var(--bg-input)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>DATASET COMPOSITION ({datasetCache.length} TOTAL FRAMES)</div>
-                      {datasetCache.length === 0 ? (
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Database is currently empty. Generated frames will appear here.</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '1px' }}>
+                        DATASET COMPOSITION ({datasetType === 'flashcards' ? datasetCache.length : videoDatasetCache.length} TOTAL CASES)
+                      </div>
+                      {(datasetType === 'flashcards' ? datasetCache.length : videoDatasetCache.length) === 0 ? (
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Database is currently empty. Generated records will appear here.</div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {Object.entries(datasetCache.reduce((acc, entry) => {
+                          {Object.entries((datasetType === 'flashcards' ? datasetCache : videoDatasetCache).reduce((acc, entry) => {
                             const e = (entry.emotions && entry.emotions.length > 0) ? entry.emotions[0] : "NEUTRAL";
                             acc[e] = (acc[e] || 0) + 1; return acc;
                           }, {})).sort((a, b) => b[1] - a[1]).map(([emotion, count]) => {
-                            const pct = ((count / datasetCache.length) * 100);
+                            const total = datasetType === 'flashcards' ? datasetCache.length : videoDatasetCache.length;
+                            const pct = ((count / total) * 100);
                             return (
                               <div key={emotion} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-main)', letterSpacing: '0.5px' }}>
@@ -624,7 +825,7 @@ function App() {
 
                   <div className="form-group stacked">
                     <div className="flex-row-between">
-                      <label>Batch Size (1 - 100,000 frames)</label>
+                      <label>Batch Size (1 - 100,000 cases)</label>
                     </div>
                     <input type="number" className="claude-slider" min="1" max="100000" value={batchSize} onChange={e => setBatchSize(e.target.value)} style={{ padding: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '6px', color: 'var(--text-main)', fontSize: '14px' }} />
                   </div>
@@ -635,85 +836,32 @@ function App() {
                       <span className="slider-value-display">{batchIntensityMin} - {batchIntensityMax}</span>
                     </div>
                     <div className="dual-range-container">
-                      <div className="dual-range-track" style={{
-                        left: `${(batchIntensityMin - 1) * 11.11}%`,
-                        right: `${100 - (batchIntensityMax - 1) * 11.11}%`
-                      }}></div>
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="10" 
-                        value={batchIntensityMin} 
-                        onChange={(e) => {
-                          const val = Math.min(Number(e.target.value), batchIntensityMax);
-                          setBatchIntensityMin(val);
-                        }} 
-                        className="dual-range-input"
-                        style={{ zIndex: batchIntensityMin > 5 ? 5 : 3 }}
-                      />
-                      <input 
-                        type="range" 
-                        min="1" 
-                        max="10" 
-                        value={batchIntensityMax} 
-                        onChange={(e) => {
-                          const val = Math.max(Number(e.target.value), batchIntensityMin);
-                          setBatchIntensityMax(val);
-                        }} 
-                        className="dual-range-input"
-                        style={{ zIndex: batchIntensityMin > 5 ? 3 : 5 }}
-                      />
+                      <div className="dual-range-track" style={{ left: `${(batchIntensityMin - 1) * 11.11}%`, right: `${100 - (batchIntensityMax - 1) * 11.11}%` }}></div>
+                      <input type="range" min="1" max="10" value={batchIntensityMin} onChange={(e) => setBatchIntensityMin(Math.min(Number(e.target.value), batchIntensityMax))} className="dual-range-input" style={{ zIndex: batchIntensityMin > 5 ? 5 : 3 }} />
+                      <input type="range" min="1" max="10" value={batchIntensityMax} onChange={(e) => setBatchIntensityMax(Math.max(Number(e.target.value), batchIntensityMin))} className="dual-range-input" style={{ zIndex: batchIntensityMin > 5 ? 3 : 5 }} />
                     </div>
                   </div>
 
                   <div className="form-group">
                     <label>Maximum Render Quality (MRQ)</label>
                     <select className="claude-select" value={batchQuality} onChange={e => setBatchQuality(e.target.value)}>
-                      <option value="720p">High-Speed (720x960)</option>
-                      <option value="1080p">Production (1080x1440)</option>
-                      <option value="4K">Lossless 4K (2160x2880)</option>
+                      <option value="720p">High-Speed (720x960)</option><option value="1080p">Production (1080x1440)</option><option value="4K">Lossless 4K (2160x2880)</option>
                     </select>
                   </div>
 
                   <div className="form-group stacked" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
                     <div className="flex-row-between" style={{ marginBottom: '8px' }}>
                       <label style={{ fontWeight: 'bold' }}>Emotion Distribution Weights</label>
-                      <button 
-                        type="button"
-                        className="toggle-btn" 
-                        style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'var(--text-main)', cursor: 'pointer', borderRadius: '4px' }}
-                        onClick={() => setEmotionWeights({ ANGER: 10, CONTEMPT: 10, DISGUST: 10, FEAR: 10, HAPPINESS: 10, SADNESS: 10, SURPRISE: 10 })}
-                      >
-                        Reset Equal
-                      </button>
+                      <button type="button" className="toggle-btn" style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'var(--text-main)', cursor: 'pointer', borderRadius: '4px' }} onClick={() => setEmotionWeights({ ANGER: 10, CONTEMPT: 10, DISGUST: 10, FEAR: 10, HAPPINESS: 10, SADNESS: 10, SURPRISE: 10 })}>Reset Equal</button>
                     </div>
-                    <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: '1.4' }}>
-                      Drag sliders to change the frequency of each expression in the generated batch.
-                    </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--bg-input)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                       {Object.keys(emotionWeights).map(emo => {
                         const sum = Object.values(emotionWeights).reduce((a, b) => a + b, 0);
                         const percent = sum > 0 ? (emotionWeights[emo] / sum) * 100 : 0;
                         return (
                           <div key={emo} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-main)' }}>
-                              <span style={{ fontWeight: '500' }}>{emo}</span>
-                              <span style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>{percent.toFixed(0)}%</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <input 
-                                type="range" 
-                                className="claude-slider" 
-                                min="0" 
-                                max="100" 
-                                value={emotionWeights[emo]} 
-                                onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  setEmotionWeights(prev => ({ ...prev, [emo]: val }));
-                                }} 
-                                style={{ flex: 1, margin: 0 }}
-                              />
-                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-main)' }}><span style={{ fontWeight: '500' }}>{emo}</span><span style={{ color: 'var(--accent-blue)', fontWeight: 'bold' }}>{percent.toFixed(0)}%</span></div>
+                            <input type="range" className="claude-slider" min="0" max="100" value={emotionWeights[emo]} onChange={(e) => setEmotionWeights(prev => ({ ...prev, [emo]: Number(e.target.value) }))} style={{ flex: 1, margin: 0 }} />
                           </div>
                         );
                       })}
@@ -722,19 +870,11 @@ function App() {
 
                   {isBatching ? (
                     <div style={{ marginTop: '32px', padding: '16px', background: 'var(--bg-input)', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--accent-blue)', fontWeight: 'bold', fontSize: '13px' }}>
-                        <span>GENERATING BATCH...</span>
-                        <span>{batchProgress ? `${batchProgress.current} / ${batchProgress.total}` : 'Initiating...'}</span>
-                      </div>
-                      <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', background: 'var(--accent-blue)', width: `${batchProgress ? (batchProgress.current / batchProgress.total) * 100 : 0}%`, transition: 'width 0.3s' }}></div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '12px' }}>
-                        <span>Elapsed: {batchProgress ? Math.floor(batchProgress.elapsed) : 0}s</span>
-                        <span>ETA: {batchProgress ? Math.floor(batchProgress.eta) : '?'}s</span>
-                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--accent-blue)', fontWeight: 'bold', fontSize: '13px' }}><span>GENERATING BATCH...</span><span>{batchProgress ? `${batchProgress.current} / ${batchProgress.total}` : 'Initiating...'}</span></div>
+                      <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}><div style={{ height: '100%', background: 'var(--accent-blue)', width: `${batchProgress ? (batchProgress.current / batchProgress.total) * 100 : 0}%`, transition: 'width 0.3s' }}></div></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '12px' }}><span>Elapsed: {batchProgress ? Math.floor(batchProgress.elapsed) : 0}s</span><span>ETA: {batchProgress ? Math.floor(batchProgress.eta) : '?'}s</span></div>
                       <button className="submit-btn" style={{ background: '#d32f2f', marginTop: '8px', padding: '8px' }} onClick={async () => {
-                        try { await fetch("http://localhost:8123/api/cancel_batch", { method: 'POST' }); setIsBatching(false); loadDataset(); } catch (e) { }
+                        try { await fetch("http://localhost:8123/api/cancel_batch", { method: 'POST' }); setIsBatching(false); loadDataset(); loadVideoDataset(); } catch (e) { }
                       }}>CANCEL GENERATION</button>
                     </div>
                   ) : (
@@ -743,22 +883,16 @@ function App() {
                       setBatchProgress(null);
                       try {
                         const payload = { 
-                          num_images: parseInt(batchSize), 
-                          intensity_min: batchIntensityMin / 10.0, 
-                          intensity_max: batchIntensityMax / 10.0, 
-                          quality: batchQuality,
-                          emotion_weights: emotionWeights
+                          type: datasetType, hold_duration_ms: datasetType === 'videos' ? dbVideoHoldDuration : 0,
+                          num_images: parseInt(batchSize), intensity_min: batchIntensityMin / 10.0, intensity_max: batchIntensityMax / 10.0, 
+                          quality: batchQuality, emotion_weights: emotionWeights
                         };
                         const res = await fetch("http://localhost:8123/api/generate_batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
                         if (!res.ok && res.status === 503) { throw new Error("503"); }
                         const data = await res.json();
-                        alert(data.status === 'success' ? `Dataset Generated successfully mapped!` : 'Generation Failed');
-                        loadDataset();
-                      } catch (e) {
-                        setShowConnectModal(true);
-                      } finally {
-                        setIsBatching(false);
-                      }
+                        alert(data.status === 'success' ? `Dataset generated successfully!` : 'Generation Failed');
+                        loadDataset(); loadVideoDataset();
+                      } catch (e) { setShowConnectModal(true); } finally { setIsBatching(false); }
                     }}>COMMENCE UNREAL BATCH GENERATION</button>
                   )}
                 </div>
@@ -779,6 +913,7 @@ function App() {
         <div className="header-tabs">
           <div className={`tab ${activeTab === 'TUTORIAL' ? 'active' : ''}`} onClick={() => setActiveTab('TUTORIAL')}>TUTORIAL</div>
           <div className={`tab ${activeTab === 'FLASHCARDS' ? 'active' : ''}`} onClick={() => setActiveTab('FLASHCARDS')}>FLASHCARDS</div>
+          <div className={`tab ${activeTab === 'VIDEO_TRAINING' ? 'active' : ''}`} onClick={() => setActiveTab('VIDEO_TRAINING')}>VIDEO TRAINING</div>
           <div className={`tab ${activeTab === 'ABOUT' ? 'active' : ''}`} onClick={() => setActiveTab('ABOUT')}>ABOUT</div>
         </div>
         <div className="header-right" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -818,11 +953,9 @@ function App() {
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚖️</div>
                 <h2 style={{ color: 'var(--text-main)', margin: '0 0 8px 0', letterSpacing: '2px', textTransform: 'uppercase' }}>NO IMAGES IN RANGE</h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '24px', textAlign: 'center', maxWidth: '400px', lineHeight: '1.5' }}>
-                  No active expressions found in the intensity range ({intensityMin} - {intensityMax}). Adjust the range sliders in the Settings panel ⚙️ or generate a new batch with the corresponding range.
+                  No active expressions found in the intensity range ({intensityMin} - {intensityMax}). Adjust the range sliders in the Settings panel ⚙️ or generate a new batch.
                 </p>
-                <button className="submit-btn" style={{ padding: '12px 32px', fontSize: '14px' }} onClick={() => setIsSettingsOpen(true)}>
-                  OPEN SETTINGS
-                </button>
+                <button className="submit-btn" style={{ padding: '12px 32px', fontSize: '14px' }} onClick={() => setIsSettingsOpen(true)}>OPEN SETTINGS</button>
               </div>
             ) : isDeckCompleted ? (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-main)', background: 'var(--bg-panel)', borderRadius: '12px', border: '1px solid var(--border-color)', padding: '40px' }}>
@@ -831,48 +964,17 @@ function App() {
                 <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '24px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.5' }}>
                   Excellent! You have successfully reviewed all {datasetCache.length} cards in this flashcard deck.
                 </p>
-                <button className="submit-btn" style={{ padding: '12px 32px', fontSize: '14px' }} onClick={handleReshuffleDeck}>
-                  RESHUFFLE & START OVER
-                </button>
+                <button className="submit-btn" style={{ padding: '12px 32px', fontSize: '14px' }} onClick={handleReshuffleDeck}>RESHUFFLE & START OVER</button>
               </div>
             ) : !hasSubmitted ? (
-              // ================= PRE-SUBMIT PHASE =================
               <div className="pre-submit-flow">
                 <div className="massive-image-arena">
                   <div className="image-title">{displayMode === 'Static' ? 'EXPRESSION' : viewingImage}</div>
                   <div className="massive-image-wrapper" onWheel={(e) => handleWheel(e, setZoomMain)}>
-                    {isLoading ? (
-                      <div className="loading-overlay">RENDERING ENGINE FRAME...</div>
-                    ) : !currentFlashcard.imgExpression ? (
-                      <div className="loading-overlay">NO IMAGE DATA</div>
-                    ) : (
+                    {isLoading ? <div className="loading-overlay">RENDERING ENGINE FRAME...</div> : !currentFlashcard.imgExpression ? <div className="loading-overlay">NO IMAGE DATA</div> : (
                       <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                        {/* Neutral Baseline Image */}
-                        <img 
-                          src={currentFlashcard.imgNeutral} 
-                          alt="Neutral" 
-                          className="full-height-img" 
-                          style={{ 
-                            transform: `scale(${zoomMain})`, 
-                            position: 'absolute', 
-                            opacity: (displayMode !== 'Static' && viewingImage === 'NEUTRAL') ? 1 : 0, 
-                            visibility: (displayMode !== 'Static' && viewingImage === 'NEUTRAL') ? 'visible' : 'hidden',
-                            zIndex: (displayMode !== 'Static' && viewingImage === 'NEUTRAL') ? 2 : 1
-                          }} 
-                        />
-                        {/* Expression Active Image */}
-                        <img 
-                          src={currentFlashcard.imgExpression} 
-                          alt="Expression" 
-                          className="full-height-img" 
-                          style={{ 
-                            transform: `scale(${zoomMain})`, 
-                            position: 'absolute', 
-                            opacity: (displayMode === 'Static' || viewingImage === 'EXPRESSION') ? 1 : 0, 
-                            visibility: (displayMode === 'Static' || viewingImage === 'EXPRESSION') ? 'visible' : 'hidden',
-                            zIndex: (displayMode === 'Static' || viewingImage === 'EXPRESSION') ? 2 : 1
-                          }} 
-                        />
+                        <img src={currentFlashcard.imgNeutral} alt="Neutral" className="full-height-img" style={{ transform: `scale(${zoomMain})`, position: 'absolute', opacity: (displayMode !== 'Static' && viewingImage === 'NEUTRAL') ? 1 : 0, visibility: (displayMode !== 'Static' && viewingImage === 'NEUTRAL') ? 'visible' : 'hidden', zIndex: (displayMode !== 'Static' && viewingImage === 'NEUTRAL') ? 2 : 1 }} />
+                        <img src={currentFlashcard.imgExpression} alt="Expression" className="full-height-img" style={{ transform: `scale(${zoomMain})`, position: 'absolute', opacity: (displayMode === 'Static' || viewingImage === 'EXPRESSION') ? 1 : 0, visibility: (displayMode === 'Static' || viewingImage === 'EXPRESSION') ? 'visible' : 'hidden', zIndex: (displayMode === 'Static' || viewingImage === 'EXPRESSION') ? 2 : 1 }} />
                       </div>
                     )}
                   </div>
@@ -895,73 +997,47 @@ function App() {
                   <div className="selection-group">
                     <div className="selection-title">SELECT EMOTION (blends supported)</div>
                     <div className="button-row">
-                      {emotions.map(emo => (
-                        <button key={emo} className={`emotion-btn ${selectedEmotions.includes(emo) ? 'selected' : ''}`} onClick={() => toggleEmotion(emo)}>{emo}</button>
-                      ))}
+                      {emotions.map(emo => <button key={emo} className={`emotion-btn ${selectedEmotions.includes(emo) ? 'selected' : ''}`} onClick={() => toggleEmotion(emo)}>{emo}</button>)}
                     </div>
                   </div>
 
                   <div className="selection-group flex-fill">
                     <div className="selection-title">SELECT ACTION UNITS (AUs)</div>
                     <div className="au-grid">
-                      {allAUs.map(au => (
-                        <button key={au.id} className={`emotion-btn ${selectedAUs.includes(au.id) ? 'selected' : ''}`} onClick={() => toggleAU(au.id)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '12px', fontWeight: '900', fontSize: '14px' }}>
-                          {au.id}
-                        </button>
-                      ))}
+                      {allAUs.map(au => <button key={au.id} className={`emotion-btn ${selectedAUs.includes(au.id) ? 'selected' : ''}`} onClick={() => toggleAU(au.id)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '12px', fontWeight: '900', fontSize: '14px' }}>{au.id}</button>)}
                     </div>
                   </div>
 
                   <div className="sidebar-footer">
-                    <div className="progress-bar">
-                      <span>Card {reviewedCount} (Pool: {poolSize || datasetCache.length})</span>
-                    </div>
+                    <div className="progress-bar"><span>Card {reviewedCount} (Pool: {poolSize || datasetCache.length})</span></div>
                     <button className="submit-btn large-submit" onClick={handleCheckAnswer}>CHECK ANSWER</button>
                   </div>
                 </div>
               </div>
             ) : (
-              // ================= POST-SUBMIT PHASE =================
               <div className="post-submit-flow">
                 <div className="post-submit-top">
                   <div className="massive-image-arena duo">
-                    <div className="image-title">
-                      {displayMode !== 'Static' ? 'INTERACTIVE COMPARISON (NEUTRAL vs EXPRESSION)' : 'YOUR EXPRESSION'}
-                    </div>
+                    <div className="image-title">{displayMode !== 'Static' ? 'INTERACTIVE COMPARISON (NEUTRAL vs EXPRESSION)' : 'YOUR EXPRESSION'}</div>
                     <div className="massive-image-wrapper" onWheel={(e) => handleWheel(e, setZoomMain)}>
-                      {!currentFlashcard.imgExpression ? (
-                        <div className="loading-overlay">NO IMAGE DATA</div>
-                      ) : displayMode !== 'Static' ? (
+                      {!currentFlashcard.imgExpression ? <div className="loading-overlay">NO IMAGE DATA</div> : displayMode !== 'Static' ? (
                         <div className="comparison-slider" style={{ transform: `scale(${zoomMain})`, transformOrigin: 'center center' }}>
                           <img src={currentFlashcard.imgExpression} alt="Expression" className="slider-bg-img" />
-                          <div className="slider-clip" style={{ width: `${sliderValue}%` }}>
-                            <img src={currentFlashcard.imgNeutral} alt="Neutral" className="slider-fg-img" />
-                          </div>
+                          <div className="slider-clip" style={{ width: `${sliderValue}%` }}><img src={currentFlashcard.imgNeutral} alt="Neutral" className="slider-fg-img" /></div>
                           <input type="range" min="0" max="100" value={sliderValue} onChange={(e) => setSliderValue(e.target.value)} className="slider-input" />
                           <div className="slider-divider" style={{ left: `${sliderValue}%` }}></div>
                           <div className="slider-label slider-label-left" style={{ transform: `scale(${1/zoomMain})`, transformOrigin: 'bottom left' }}>NEUTRAL</div>
                           <div className="slider-label slider-label-right" style={{ transform: `scale(${1/zoomMain})`, transformOrigin: 'bottom right' }}>EXPRESSION</div>
                         </div>
-                      ) : (
-                        <img src={currentFlashcard.imgExpression} alt="Expression" className="full-height-img" style={{ transform: `scale(${zoomMain})` }} />
-                      )}
+                      ) : <img src={currentFlashcard.imgExpression} alt="Expression" className="full-height-img" style={{ transform: `scale(${zoomMain})` }} />}
                     </div>
-                    {displayMode !== 'Static' && (
-                      <div className="slider-legend" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px 0', fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        <span>← Left of divider: NEUTRAL</span>
-                        <span>Right of divider: EXPRESSION →</span>
-                      </div>
-                    )}
+                    {displayMode !== 'Static' && <div className="slider-legend" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px 0', fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}><span>← Left of divider: NEUTRAL</span><span>Right of divider: EXPRESSION →</span></div>}
                   </div>
 
                   <div className="massive-image-arena duo">
-                    <div className="image-title" style={{ color: 'var(--accent-blue)' }}>
-                      VISUAL GUIDE: {currentFlashcard.correctEmotions.join(' + ')}
-                    </div>
+                    <div className="image-title" style={{ color: 'var(--accent-blue)' }}>VISUAL GUIDE: {currentFlashcard.correctEmotions.join(' + ')}</div>
                     <div className="massive-image-wrapper visual-guide-wrapper" onWheel={(e) => handleWheel(e, setZoomGuide)}>
-                      {!currentFlashcard.imgExpression ? (
-                        <div className="loading-overlay">NO IMAGE DATA</div>
-                      ) : (
+                      {!currentFlashcard.imgExpression ? <div className="loading-overlay">NO IMAGE DATA</div> : (
                         <>
                           <img src={currentFlashcard.imgExpression} alt="Visual Guide" className="full-height-img" style={{ transform: `scale(${zoomGuide})` }} />
                           <div className="guide-arrow" style={{ top: '25%', left: '35%', transform: 'scaleY(-1)' }}>↑</div>
@@ -977,25 +1053,228 @@ function App() {
                   <div className="results-strip">
                     <div className="res-block">
                       <div className="res-header">YOUR EMOTION</div>
-                      <div className="res-val-row">
-                        <span>{selectedEmotions.length ? selectedEmotions.join(' + ') : 'None'}</span>
-                        <span className={`res-badge ${isEmotionCorrect ? 'correct' : 'incorrect'}`}>{isEmotionCorrect ? 'CORRECT' : 'INCORRECT'}</span>
-                      </div>
+                      <div className="res-val-row"><span>{selectedEmotions.length ? selectedEmotions.join(' + ') : 'None'}</span><span className={`res-badge ${isEmotionCorrect ? 'correct' : 'incorrect'}`}>{isEmotionCorrect ? 'CORRECT' : 'INCORRECT'}</span></div>
                       {!isEmotionCorrect && <div className="res-correction">Should be: {currentFlashcard.correctEmotions.join(' + ')}</div>}
                     </div>
                     <div className="res-block">
                       <div className="res-header">YOUR ACTION UNITS</div>
-                      <div className="res-val-row">
-                        <span>{selectedAUs.length ? selectedAUs.join(' + ') : 'None'}</span>
-                        <span className={`res-badge ${isAUsCorrect ? 'correct' : 'incorrect'}`}>{isAUsCorrect ? 'CORRECT' : 'INCORRECT'}</span>
-                      </div>
+                      <div className="res-val-row"><span>{selectedAUs.length ? selectedAUs.join(' + ') : 'None'}</span><span className={`res-badge ${isAUsCorrect ? 'correct' : 'incorrect'}`}>{isAUsCorrect ? 'CORRECT' : 'INCORRECT'}</span></div>
                       {!isAUsCorrect && <div className="res-correction">Should be: {currentFlashcard.correctAUs.join(' + ')}</div>}
                     </div>
                   </div>
-
                   <div className="bottom-nav">
                     <button className="nav-btn" onClick={handlePrevImage} disabled={drawnIndices.length === 0} style={{ opacity: drawnIndices.length === 0 ? 0.5 : 1 }}>PREVIOUS</button>
                     <button className="nav-btn primary" onClick={handleNextImage}>NEXT IMAGE</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'VIDEO_TRAINING' && (
+          <div className="flashcard-workspace">
+            {videoDatasetCache.length === 0 ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)', background: 'var(--bg-panel)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '16px', opacity: 0.5 }}>
+                  <path d="M23 7a2 2 0 0 0-2.45-1.45L16 7V5a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2l4.55 1.45A2 2 0 0 0 23 17V7z"></path>
+                </svg>
+                <h2 style={{ color: 'var(--text-main)', margin: '0 0 8px 0', letterSpacing: '2px' }}>VIDEO DATASET EMPTY</h2>
+                <p style={{ fontSize: '13px' }}>Open the Settings menu ⚙️, navigate to 🗄️ Database, select **Video Cases** and commence generation.</p>
+              </div>
+            ) : videoIsRangeEmpty ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)', background: 'var(--bg-panel)', borderRadius: '12px', border: '1px solid var(--border-color)', padding: '40px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚖️</div>
+                <h2 style={{ color: 'var(--text-main)', margin: '0 0 8px 0', letterSpacing: '2px', textTransform: 'uppercase' }}>NO VIDEOS IN RANGE</h2>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '24px', textAlign: 'center', maxWidth: '400px', lineHeight: '1.5' }}>
+                  No video cases found with intensity {videoIntensityMin} - {videoIntensityMax} and duration {videoHoldDuration}ms. Adjust the filters in Settings ⚙️ or render a new batch in Database.
+                </p>
+                <button className="submit-btn" style={{ padding: '12px 32px', fontSize: '14px' }} onClick={() => setIsSettingsOpen(true)}>OPEN SETTINGS</button>
+              </div>
+            ) : videoIsDeckCompleted ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-main)', background: 'var(--bg-panel)', borderRadius: '12px', border: '1px solid var(--border-color)', padding: '40px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🎉</div>
+                <h2 style={{ margin: '0 0 8px 0', letterSpacing: '1px', textTransform: 'uppercase' }}>VIDEO DECK COMPLETED!</h2>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '24px', textAlign: 'center', maxWidth: '300px', lineHeight: '1.5' }}>
+                  Awesome! You reviewed all {videoPoolSize} video cases in this deck.
+                </p>
+                <button className="submit-btn" style={{ padding: '12px 32px', fontSize: '14px' }} onClick={handleReshuffleVideoDeck}>RESHUFFLE & START OVER</button>
+              </div>
+            ) : !videoHasSubmitted ? (
+              // ================= PRE-SUBMIT VIDEO WORKSPACE =================
+              <div className="pre-submit-flow">
+                <div className="massive-image-arena">
+                  <div className="image-title">
+                    VIDEO PLAYBACK ({currentVideo ? `${currentVideo.fps} FPS | Hold: ${currentVideo.duration_ms}ms` : ''})
+                  </div>
+                  <div className="massive-image-wrapper" onWheel={(e) => handleWheel(e, setVideoZoomMain)}>
+                    {!currentVideo || !currentVideo.video_url ? (
+                      <div className="loading-overlay">LOADING VIDEO...</div>
+                    ) : (
+                      <video 
+                        ref={videoRef}
+                        src={`/dataset/${currentVideo.video_url}`} 
+                        className="full-height-img" 
+                        style={{ transform: `scale(${videoZoomMain})` }}
+                        playsInline
+                        muted
+                        onTimeUpdate={(e) => setVideoCurrentTime(e.target.currentTime)}
+                        onDurationChange={(e) => setVideoDuration(e.target.duration)}
+                        onEnded={() => setVideoIsPlaying(false)}
+                      />
+                    )}
+                  </div>
+                  
+                  <div className="video-player-controls">
+                    <button className="video-btn play-pause-btn" onClick={handleTogglePlay}>
+                      {videoIsPlaying ? '⏸ PAUSE' : '▶ PLAY'}
+                    </button>
+                    <button className="video-btn replay-btn" onClick={handleReplay}>
+                      🔄 REPLAY
+                    </button>
+                    <div className="video-timeline-container disabled">
+                      <span className="time-display">{videoCurrentTime.toFixed(2)}s / {videoDuration.toFixed(2)}s</span>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max={videoDuration || 1} 
+                        step="0.01"
+                        value={videoCurrentTime} 
+                        disabled 
+                        className="video-scrubber"
+                      />
+                      <span className="lock-tag">Timeline locked during guessing</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="guessing-sidebar">
+                  <div className="selection-group">
+                    <div className="selection-title">SELECT EMOTION (blends supported)</div>
+                    <div className="button-row">
+                      {emotions.map(emo => <button key={emo} className={`emotion-btn ${videoSelectedEmotions.includes(emo) ? 'selected' : ''}`} onClick={() => toggleVideoEmotion(emo)}>{emo}</button>)}
+                    </div>
+                  </div>
+                  <div className="selection-group flex-fill">
+                    <div className="selection-title">SELECT ACTION UNITS (AUs)</div>
+                    <div className="au-grid">
+                      {allAUs.map(au => <button key={au.id} className={`emotion-btn ${videoSelectedAUs.includes(au.id) ? 'selected' : ''}`} onClick={() => toggleVideoAU(au.id)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '12px', fontWeight: '900', fontSize: '14px' }}>{au.id}</button>)}
+                    </div>
+                  </div>
+                  <div className="sidebar-footer">
+                    <div className="progress-bar"><span>Video {videoReviewedCount} (Pool: {videoPoolSize})</span></div>
+                    <button className="submit-btn large-submit" onClick={handleCheckVideoAnswer}>CHECK ANSWER</button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // ================= POST-SUBMIT VIDEO WORKSPACE =================
+              <div className="post-submit-flow">
+                <div className="post-submit-top">
+                  <div className="massive-image-arena duo">
+                    <div className="image-title">VIDEO REVIEW (Timeline scrubbing & speed unlocked)</div>
+                    <div className="massive-image-wrapper" onWheel={(e) => handleWheel(e, setVideoZoomMain)}>
+                      {!currentVideo || !currentVideo.video_url ? (
+                        <div className="loading-overlay">LOADING VIDEO...</div>
+                      ) : (
+                        <video 
+                          ref={videoRef}
+                          src={`/dataset/${currentVideo.video_url}`} 
+                          className="full-height-img" 
+                          style={{ transform: `scale(${videoZoomMain})` }}
+                          playsInline
+                          muted
+                          onTimeUpdate={(e) => setVideoCurrentTime(e.target.currentTime)}
+                          onDurationChange={(e) => setVideoDuration(e.target.duration)}
+                          onEnded={() => setVideoIsPlaying(false)}
+                        />
+                      )}
+                    </div>
+                    
+                    <div className="video-player-controls post-submit">
+                      <div className="control-row">
+                        <button className="video-btn play-pause-btn" onClick={handleTogglePlay}>
+                          {videoIsPlaying ? '⏸ PAUSE' : '▶ PLAY'}
+                        </button>
+                        <button className="video-btn replay-btn" onClick={handleReplay}>
+                          🔄 REPLAY
+                        </button>
+                        <div className="speed-buttons">
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>SPEED:</span>
+                          <button className={`speed-btn ${videoPlaybackSpeed === 1.0 ? 'active' : ''}`} onClick={() => setVideoPlaybackSpeed(1.0)}>1.0x</button>
+                          <button className={`speed-btn ${videoPlaybackSpeed === 0.5 ? 'active' : ''}`} onClick={() => setVideoPlaybackSpeed(0.5)}>0.5x</button>
+                          <button className={`speed-btn ${videoPlaybackSpeed === 0.25 ? 'active' : ''}`} onClick={() => setVideoPlaybackSpeed(0.25)}>0.25x</button>
+                        </div>
+                      </div>
+
+                      <div className="video-timeline-container">
+                        <span className="time-display">{videoCurrentTime.toFixed(2)}s / {videoDuration.toFixed(2)}s</span>
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max={videoDuration || 1} 
+                          step="0.01"
+                          value={videoCurrentTime} 
+                          onChange={(e) => {
+                            const t = parseFloat(e.target.value);
+                            if (videoRef.current) {
+                              videoRef.current.currentTime = t;
+                              setVideoCurrentTime(t);
+                            }
+                          }}
+                          className="video-scrubber active"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="massive-image-arena duo">
+                    <div className="image-title" style={{ color: 'var(--accent-blue)' }}>
+                      VISUAL GUIDE: {currentVideo ? currentVideo.emotions.join(' + ') : 'NEUTRAL'} (PEAK EXPRESSION)
+                    </div>
+                    <div className="massive-image-wrapper visual-guide-wrapper" onWheel={(e) => handleWheel(e, setVideoZoomGuide)}>
+                      {!currentVideo || !currentVideo.video_url ? (
+                        <div className="loading-overlay">NO IMAGE DATA</div>
+                      ) : (
+                        <>
+                          <video 
+                            ref={guideVideoRef}
+                            src={`/dataset/${currentVideo.video_url}`} 
+                            className="full-height-img" 
+                            style={{ transform: `scale(${videoZoomGuide})` }} 
+                            playsInline
+                            muted
+                            onLoadedData={() => {
+                              if (guideVideoRef.current) {
+                                guideVideoRef.current.currentTime = getPeakTimestamp();
+                              }
+                            }}
+                          />
+                          <div className="guide-arrow" style={{ top: '25%', left: '35%', transform: 'scaleY(-1)' }}>↑</div>
+                          <div className="guide-highlight" style={{ top: '20%', left: '25%', width: '50%', height: '15%' }}></div>
+                          <div className="guide-text-overlay" style={{ top: '15%', left: '48%' }}>AU4</div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="post-submit-bottom">
+                  <div className="results-strip">
+                    <div className="res-block">
+                      <div className="res-header">YOUR EMOTION</div>
+                      <div className="res-val-row"><span>{videoSelectedEmotions.length ? videoSelectedEmotions.join(' + ') : 'None'}</span><span className={`res-badge ${isVideoEmotionCorrect ? 'correct' : 'incorrect'}`}>{isVideoEmotionCorrect ? 'CORRECT' : 'INCORRECT'}</span></div>
+                      {!isVideoEmotionCorrect && <div className="res-correction">Should be: {currentVideo ? currentVideo.emotions.join(' + ') : 'NEUTRAL'}</div>}
+                    </div>
+                    <div className="res-block">
+                      <div className="res-header">YOUR ACTION UNITS</div>
+                      <div className="res-val-row"><span>{videoSelectedAUs.length ? videoSelectedAUs.join(' + ') : 'None'}</span><span className={`res-badge ${isVideoAUsCorrect ? 'correct' : 'incorrect'}`}>{isVideoAUsCorrect ? 'CORRECT' : 'INCORRECT'}</span></div>
+                      {!isVideoAUsCorrect && <div className="res-correction">Should be: {currentVideo && currentVideo.controls_applied ? Object.keys(currentVideo.controls_applied).join(' + ') : 'None'}</div>}
+                    </div>
+                  </div>
+                  <div className="bottom-nav">
+                    <button className="nav-btn" onClick={handlePrevVideo} disabled={videoDrawnIndices.length === 0} style={{ opacity: videoDrawnIndices.length === 0 ? 0.5 : 1 }}>PREVIOUS</button>
+                    <button className="nav-btn primary" onClick={handleNextVideo}>NEXT VIDEO</button>
                   </div>
                 </div>
               </div>

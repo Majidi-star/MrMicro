@@ -1112,3 +1112,131 @@ input[type=range] {
 .dual-range-input::-moz-range-thumb:hover {
   transform: scale(1.15);
 }
+
+/* ==================== VIDEO TRAINING COMPONENT STYLES ==================== */
+.video-player-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-input);
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.video-player-controls.post-submit {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.video-player-controls .control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.video-btn {
+  background: var(--accent-blue);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 11px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.video-btn:hover {
+  background-color: var(--accent-blue-hover);
+  transform: translateY(-1px);
+}
+
+.video-btn:active {
+  transform: translateY(0);
+}
+
+.video-timeline-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  position: relative;
+}
+
+.video-timeline-container.disabled {
+  opacity: 0.6;
+}
+
+.time-display {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-family: monospace;
+  min-width: 50px;
+}
+
+.video-scrubber {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  outline: none;
+  -webkit-appearance: none;
+  cursor: ew-resize;
+}
+
+.video-scrubber.active {
+  accent-color: var(--accent-blue);
+}
+
+.video-scrubber:disabled {
+  cursor: not-allowed;
+  accent-color: var(--text-muted);
+}
+
+.lock-tag {
+  font-size: 10px;
+  background: rgba(255, 59, 48, 0.15);
+  color: var(--accent-red);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(255, 59, 48, 0.3);
+}
+
+.speed-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.speed-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.speed-btn.active {
+  background: var(--accent-blue);
+  color: white;
+  border-color: var(--accent-blue);
+}

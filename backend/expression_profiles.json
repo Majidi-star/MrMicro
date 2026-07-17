@@ -1,0 +1,39 @@
+{
+  "CONTEMPT": {
+    "CTRL_L_mouth_cornerPull": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.05 },
+    "CTRL_L_mouth_dimple": { "target": 1.0, "delay_ms": 60, "easing": "cubic", "jitter": 0.01 }
+  },
+  "HAPPINESS": {
+    "CTRL_L_mouth_cornerPull": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.02 },
+    "CTRL_R_mouth_cornerPull": { "target": 1.0, "delay_ms": 10, "easing": "cubic", "jitter": 0.02 }
+  },
+  "ANGER": {
+    "CTRL_L_brow_down": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.01 },
+    "CTRL_R_brow_down": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.01 }
+  },
+  "SURPRISE": {
+    "CTRL_L_brow_raiseIn": { "target": 1.0, "delay_ms": 0, "easing": "linear", "jitter": 0.0 },
+    "CTRL_R_brow_raiseIn": { "target": 1.0, "delay_ms": 0, "easing": "linear", "jitter": 0.0 },
+    "CTRL_L_brow_raiseOut": { "target": 1.0, "delay_ms": 0, "easing": "linear", "jitter": 0.0 },
+    "CTRL_R_brow_raiseOut": { "target": 1.0, "delay_ms": 0, "easing": "linear", "jitter": 0.0 },
+    "CTRL_C_jaw_openExtreme": { "target": 0.5, "delay_ms": 20, "easing": "cubic", "jitter": 0.0 }
+  },
+  "SADNESS": {
+    "CTRL_L_mouth_cornerDepress": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.02 },
+    "CTRL_R_mouth_cornerDepress": { "target": 1.0, "delay_ms": 10, "easing": "cubic", "jitter": 0.02 },
+    "CTRL_L_brow_raiseIn": { "target": 1.0, "delay_ms": 40, "easing": "cubic", "jitter": 0.0 },
+    "CTRL_R_brow_raiseIn": { "target": 1.0, "delay_ms": 40, "easing": "cubic", "jitter": 0.0 }
+  },
+  "FEAR": {
+    "CTRL_L_brow_raiseIn": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.05 },
+    "CTRL_R_brow_raiseIn": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.05 },
+    "CTRL_L_mouth_stretch": { "target": 1.0, "delay_ms": 20, "easing": "cubic", "jitter": 0.08 },
+    "CTRL_R_mouth_stretch": { "target": 1.0, "delay_ms": 20, "easing": "cubic", "jitter": 0.08 }
+  },
+  "DISGUST": {
+    "CTRL_L_nose_wrinkleUpper": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.03 },
+    "CTRL_R_nose_wrinkleUpper": { "target": 1.0, "delay_ms": 0, "easing": "cubic", "jitter": 0.03 },
+    "CTRL_L_mouth_upperLipRaise": { "target": 1.0, "delay_ms": 30, "easing": "cubic", "jitter": 0.01 },
+    "CTRL_R_mouth_upperLipRaise": { "target": 1.0, "delay_ms": 30, "easing": "cubic", "jitter": 0.01 }
+  }
+}
